@@ -589,15 +589,21 @@ private class Lfm2VlMultiModalProjector: Module, UnaryLayer {
     @ModuleInfo(key: "layer_norm") var layerNorm: LayerNorm?
     @ModuleInfo(key: "linear_1") var linear1: Linear
     @ModuleInfo(key: "linear_2") var linear2: Linear
+    private let useLayerNorm: Bool
 
     init(config: LFM2VLConfiguration) {
         let inChannels =
             config.visionConfiguration.hiddenSize
             * (config.downsampleFactor * config.downsampleFactor)
 
-        if config.projectorUseLayernorm {
-            self._layerNorm.wrappedValue = LayerNorm(dimensions: inChannels)
-        }
+        useLayerNorm = config.projectorUseLayernorm
+
+        // Always initialise — the LFM2.5-VL-450M-MLX-8bit repo ships
+        // "projector_use_layernorm": false in config.json but the weights
+        // still contain layer_norm.{weight,bias}.  MLX panics if it finds
+        // a weight key whose Swift property is nil.  useLayerNorm gates
+        // whether the norm is actually applied at inference time.
+        self._layerNorm.wrappedValue = LayerNorm(dimensions: inChannels)
 
         self._linear1.wrappedValue = Linear(
             inChannels, config.projectorHiddenSize, bias: config.projectorBias)
@@ -608,7 +614,7 @@ private class Lfm2VlMultiModalProjector: Module, UnaryLayer {
 
     func callAsFunction(_ x: MLXArray) -> MLXArray {
         var x = x
-        if let layerNorm {
+        if useLayerNorm, let layerNorm {
             x = layerNorm(x)
         }
         x = linear1(x)
