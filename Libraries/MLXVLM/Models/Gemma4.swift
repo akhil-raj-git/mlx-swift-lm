@@ -934,7 +934,8 @@ private final class Gemma4TextBackbone: Module {
         var result = embedTokensPerLayer(tokens)
         result = (result * MLXArray(embedTokensPerLayerScale, dtype: .float32)).asType(result.dtype)
         return result.reshaped(
-            Array(inputIds.shape) + [config.hiddenLayers, config.hiddenSizePerLayerInput]
+            result.dim(0), result.dim(1),
+            config.hiddenLayers, config.hiddenSizePerLayerInput
         )
     }
 
@@ -947,9 +948,8 @@ private final class Gemma4TextBackbone: Module {
 
         var perLayerProjection = perLayerModelProjection(inputsEmbeds)
         perLayerProjection = perLayerProjection.reshaped(
-            Array(inputsEmbeds.shape.dropLast()) + [
-                config.hiddenLayers, config.hiddenSizePerLayerInput,
-            ]
+            perLayerProjection.dim(0), perLayerProjection.dim(1),
+            config.hiddenLayers, config.hiddenSizePerLayerInput
         )
         perLayerProjection = perLayerProjectionNorm(perLayerProjection)
 
@@ -990,7 +990,16 @@ private final class Gemma4TextBackbone: Module {
         } else {
             processedPerLayerInputs = nil
         }
-        let finalPerLayerInputs = projectPerLayerInputs(h0, perLayerInputs: processedPerLayerInputs)
+        let _finalPerLayerInputsCombined = projectPerLayerInputs(
+            h0, perLayerInputs: processedPerLayerInputs)
+        let finalPerLayerInputs: [MLXArray?]
+        if let combined = _finalPerLayerInputsCombined {
+            finalPerLayerInputs = (0 ..< config.hiddenLayers).map { i in
+                combined[.ellipsis, i, 0...]
+            }
+        } else {
+            finalPerLayerInputs = Array(repeating: nil, count: config.hiddenLayers)
+        }
 
         let hasExplicitCache = cache != nil
         let localCache =
@@ -1029,12 +1038,7 @@ private final class Gemma4TextBackbone: Module {
                 } else {
                     slidingMask
                 }
-            let layerInput: MLXArray? =
-                if let finalPerLayerInputs {
-                    finalPerLayerInputs[0..., 0..., idx, 0...]
-                } else {
-                    nil
-                }
+            let layerInput: MLXArray? = finalPerLayerInputs[idx]
             let (output, kvState, attentionOffset) = layer(
                 h,
                 mask: layerMask,
