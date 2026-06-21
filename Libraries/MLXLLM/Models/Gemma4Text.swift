@@ -272,8 +272,8 @@ private class Gemma4Attention: Module {
             keys = sharedK
             values = sharedV
         } else {
-            var k = kProj(x).reshaped(B, L, nKvHeads, effectiveHeadDim)
-            k = kNorm(k)
+            let rawK = kProj(x).reshaped(B, L, nKvHeads, effectiveHeadDim)
+            var k = kNorm(rawK)
             k = k.transposed(0, 2, 1, 3)
             k = applyRotaryPosition(rope, to: k, offset: activePositionOffset)
 
@@ -281,7 +281,7 @@ private class Gemma4Attention: Module {
             if let vProj {
                 v = vProj(x).reshaped(B, L, nKvHeads, effectiveHeadDim)
             } else {
-                v = k
+                v = rawK
             }
             v = vNorm(v)
             v = v.transposed(0, 2, 1, 3)

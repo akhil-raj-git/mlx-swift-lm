@@ -90,6 +90,7 @@ public enum VLMTypeRegistry {
         "idefics3": create(Idefics3Configuration.self, Idefics3.init),
         "gemma3": create(Gemma3Configuration.self, Gemma3.init),
         "gemma4": create(Gemma4Configuration.self, Gemma4.init),
+        "gemma4_unified": create(Gemma4Configuration.self, Gemma4.init),
         "smolvlm": create(SmolVLM2Configuration.self, SmolVLM2.init),
         "fastvlm": create(FastVLMConfiguration.self, FastVLM.init),
         "llava_qwen2": create(FastVLMConfiguration.self, FastVLM.init),
@@ -118,6 +119,8 @@ public enum VLMProcessorTypeRegistry {
         "Gemma3Processor": create(
             Gemma3ProcessorConfiguration.self, Gemma3Processor.init),
         "Gemma4Processor": create(
+            Gemma4ProcessorConfiguration.self, Gemma4Processor.init),
+        "Gemma4UnifiedProcessor": create(
             Gemma4ProcessorConfiguration.self, Gemma4Processor.init),
         "SmolVLMProcessor": create(
             SmolVLMProcessorConfiguration.self, SmolVLMProcessor.init),

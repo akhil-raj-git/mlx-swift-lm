@@ -8,12 +8,15 @@ import MLXNN
 
 private enum Gemma4Error: LocalizedError {
     case imageTokenCountMismatch(expectedVisionTokens: Int, actualPromptTokens: Int)
+    case visionUnsupported
 
     var errorDescription: String? {
         switch self {
         case .imageTokenCountMismatch(let expectedVisionTokens, let actualPromptTokens):
             return
                 "Gemma4 image token count mismatch: vision encoder produced \(expectedVisionTokens) soft tokens, but the prompt contains \(actualPromptTokens) image tokens."
+        case .visionUnsupported:
+            return "This Gemma4 checkpoint is loaded in text-only mode because its vision embedder is not supported."
         }
     }
 }
@@ -1646,9 +1649,9 @@ private final class Gemma4MultimodalEmbedder: Module, UnaryLayer {
 // MARK: - Model
 
 public final class Gemma4: Module, VLMModel, KVCacheDimensionProvider {
-    @ModuleInfo(key: "vision_tower") private var visionTower: Gemma4VisionModel
+    @ModuleInfo(key: "vision_tower") private var visionTower: Gemma4VisionModel?
     @ModuleInfo(key: "language_model") private var languageModel: Gemma4TextLanguageModel
-    @ModuleInfo(key: "embed_vision") private var embedVision: Gemma4MultimodalEmbedder
+    @ModuleInfo(key: "embed_vision") private var embedVision: Gemma4MultimodalEmbedder?
 
     public let config: Gemma4Configuration
 
@@ -1658,13 +1661,15 @@ public final class Gemma4: Module, VLMModel, KVCacheDimensionProvider {
 
     public init(_ config: Gemma4Configuration) {
         self.config = config
-        self._visionTower.wrappedValue = Gemma4VisionModel(config: config.visionConfiguration)
         self._languageModel.wrappedValue = Gemma4TextLanguageModel(config.textConfiguration)
-        self._embedVision.wrappedValue = Gemma4MultimodalEmbedder(
-            embeddingDim: config.visionConfiguration.hiddenSize,
-            textHiddenSize: config.textConfiguration.hiddenSize,
-            eps: config.visionConfiguration.rmsNormEps
-        )
+        if config.modelType != "gemma4_unified" {
+            self._visionTower.wrappedValue = Gemma4VisionModel(config: config.visionConfiguration)
+            self._embedVision.wrappedValue = Gemma4MultimodalEmbedder(
+                embeddingDim: config.visionConfiguration.hiddenSize,
+                textHiddenSize: config.textConfiguration.hiddenSize,
+                eps: config.visionConfiguration.rmsNormEps
+            )
+        }
         super.init()
     }
 
@@ -1698,6 +1703,9 @@ public final class Gemma4: Module, VLMModel, KVCacheDimensionProvider {
 
         guard let pixelValues else {
             return (inputsEmbeds, perLayerInputs)
+        }
+        guard let visionTower, let embedVision else {
+            throw Gemma4Error.visionUnsupported
         }
 
         var imageFeatures = visionTower(pixelValues)
@@ -1749,7 +1757,23 @@ public final class Gemma4: Module, VLMModel, KVCacheDimensionProvider {
     }
 
     public func sanitize(weights: [String: MLXArray]) -> [String: MLXArray] {
-        var sanitized = languageModel.sanitize(weights: weights)
+        if config.modelType == "gemma4_unified" {
+            let textWeights = weights.filter { key, _ in
+                key.hasPrefix("language_model.")
+            }
+            return languageModel.sanitize(weights: textWeights)
+        }
+
+        let remapped = weights.reduce(into: [String: MLXArray]()) { result, pair in
+            let key =
+                if pair.key.hasPrefix("vision_embedder.") {
+                    "vision_tower." + String(pair.key.dropFirst("vision_embedder.".count))
+                } else {
+                    pair.key
+                }
+            result[String(key)] = pair.value
+        }
+        var sanitized = languageModel.sanitize(weights: remapped)
 
         // This port currently supports text + vision only.
         sanitized = sanitized.filter { key, _ in
